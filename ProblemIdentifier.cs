@@ -1,4 +1,5 @@
-﻿using System;
+﻿using CSharpFunctionalExtensions;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -6,38 +7,30 @@ namespace PathCleaner
 {
     class ProblemIdentifier
     {
-        public IEnumerable<IPathChecker> Checkers { get; private set; }
-        public PathString PathString { get; private set; }
 
-        public ProblemIdentifier(PathString pathString, IEnumerable<IPathChecker> checkers)
+        public static List<PathProblem> FindProblems(List<Func<string, Maybe<string>, Result>> funcs, Path path)
         {
-            this.PathString = pathString;
-            this.Checkers = checkers;
-        }
+            var pat = path.Folders.Select(x => x.IndexOf('%') >= 0 ? Environment.ExpandEnvironmentVariables(x) : x).ToList();
 
-        public IEnumerable<PathProblem> FindProblems()
-        {
-            var sortedFolders = new List<string>(PathString.Folders.OrderBy(s => s));
-            string previousFolder = null;
-            foreach (string folder in sortedFolders)
+            var k = new List<Maybe<string>>();
+
+            k.Add(Maybe<string>.None);
+
+            k.AddRange(pat.Select(x => Maybe<string>.From(x)));
+
+            var p = pat.Zip(k, (x, y) => Tuple.Create<string, Maybe<string>>(x, y)).ToList();
+
+            var t = (from a in funcs
+                     from b in p
+                     select Tuple.Create(b.Item1, b.Item2, a)).ToList();
+
+            var s = t.Where(x => x.Item3(x.Item1, x.Item2).IsFailure).Select(x => new PathProblem
             {
-                string expandedFolder = folder;
-                if (folder.IndexOf('%') >= 0)
-                {
-                    expandedFolder = Environment.ExpandEnvironmentVariables(folder);
-                }
-                var successfulChecker = Checkers.FirstOrDefault(c => c.Identify(expandedFolder, previousFolder));
-                if (successfulChecker != null)
-                {
-                    var problem = new PathProblem
-                    {
-                        Path = folder,
-                        Reason = successfulChecker.Reason,
-                    };
-                    yield return problem;
-                }
-                previousFolder = folder;
-            }
+                Path = x.Item1,
+                Reason = x.Item3(x.Item1, x.Item2).Error
+            }).ToList();
+
+            return s;
         }
     }
 }
